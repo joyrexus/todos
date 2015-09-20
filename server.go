@@ -45,7 +45,7 @@ func NewServer(bxPath string) *Server {
 }
 
 type Server struct {
-	URL string
+	URL        string
 	buckets    *buckets.DB
 	httpserver *httptest.Server
 }
@@ -94,24 +94,21 @@ func NewController(bk *buckets.Bucket) *Controller {
 		"sat": 6,
 		"sun": 7,
 	}
-	// map of prefix scanners for iterating over keys with prefixes
-	prefixscan := map[string]*buckets.PrefixScanner{
-		"mon": bk.NewPrefixScanner([]byte("1")),
-		"tue": bk.NewPrefixScanner([]byte("2")),
+	// map of scanners for iterating over keys with prefixes
+	scan := map[string]buckets.Scanner{
+		"mon": bk.NewPrefixScanner([]byte("1")), // mon keys have prefix `1`
+		"tue": bk.NewPrefixScanner([]byte("2")), // tue keys have prefix `2`
 		"wed": bk.NewPrefixScanner([]byte("3")),
 		"thu": bk.NewPrefixScanner([]byte("4")),
 		"fri": bk.NewPrefixScanner([]byte("5")),
 		"sat": bk.NewPrefixScanner([]byte("6")),
 		"sun": bk.NewPrefixScanner([]byte("7")),
-	}
-	// map of range scanners for iterating over keys within ranges
-	rangescan := map[string]*buckets.RangeScanner{
 		// weekdays are mon to fri: 1 <= key < 6.
 		"weekday": bk.NewRangeScanner([]byte("1"), []byte("6")),
 		// weekends are sat to sun: 6 <= key < 8.
 		"weekend": bk.NewRangeScanner([]byte("6"), []byte("8")),
 	}
-	return &Controller{bk, daynum, prefixscan, rangescan}
+	return &Controller{bk, daynum, scan}
 }
 
 // This Controller handles requests for todo items.  The items are stored
@@ -122,10 +119,9 @@ func NewController(bk *buckets.Bucket) *Controller {
 // imported) as our router, each method is a `httprouter.Handle` rather
 // than a `http.HandlerFunc`.
 type Controller struct {
-	todos      *buckets.Bucket
-	daynum     map[string]int
-	prefixscan map[string]*buckets.PrefixScanner
-	rangescan  map[string]*buckets.RangeScanner
+	todos  *buckets.Bucket
+	daynum map[string]int
+	scan   map[string]buckets.Scanner
 }
 
 // getWeekendTasks handles get requests for `/weekend`, returning the
@@ -138,7 +134,7 @@ func (c *Controller) getWeekendTasks(w http.ResponseWriter, r *http.Request,
 	_ httprouter.Params) {
 
 	// Get todo items within the weekend range.
-	items, err := c.rangescan["weekend"].Items()
+	items, err := c.scan["weekend"].Items()
 	if err != nil {
 		http.Error(w, err.Error(), 500)
 	}
@@ -168,7 +164,7 @@ func (c *Controller) getWeekdayTasks(w http.ResponseWriter, r *http.Request,
 	_ httprouter.Params) {
 
 	// Get todo items within the weekday range.
-	items, err := c.rangescan["weekday"].Items()
+	items, err := c.scan["weekday"].Items()
 	if err != nil {
 		http.Error(w, err.Error(), 500)
 	}
@@ -200,7 +196,7 @@ func (c *Controller) getDayTasks(w http.ResponseWriter, r *http.Request,
 
 	// Get todo items for the day requested.
 	day := p.ByName("day")
-	items, err := c.prefixscan[day].Items()
+	items, err := c.scan[day].Items()
 	if err != nil {
 		http.Error(w, err.Error(), 500)
 	}
