@@ -8,6 +8,7 @@ import (
 	"log"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"time"
 
 	"github.com/joyrexus/buckets"
@@ -94,21 +95,7 @@ func NewController(bk *buckets.Bucket) *Controller {
 		"sat": 6,
 		"sun": 7,
 	}
-	// map of scanners for iterating over keys with prefixes
-	scan := map[string]buckets.Scanner{
-		"mon": bk.NewPrefixScanner([]byte("1")), // mon keys have prefix `1`
-		"tue": bk.NewPrefixScanner([]byte("2")), // tue keys have prefix `2`
-		"wed": bk.NewPrefixScanner([]byte("3")),
-		"thu": bk.NewPrefixScanner([]byte("4")),
-		"fri": bk.NewPrefixScanner([]byte("5")),
-		"sat": bk.NewPrefixScanner([]byte("6")),
-		"sun": bk.NewPrefixScanner([]byte("7")),
-		// weekdays are mon to fri: 1 <= key < 6.
-		"weekday": bk.NewRangeScanner([]byte("1"), []byte("6")),
-		// weekends are sat to sun: 6 <= key < 8.
-		"weekend": bk.NewRangeScanner([]byte("6"), []byte("8")),
-	}
-	return &Controller{bk, daynum, scan}
+	return &Controller{bk, daynum}
 }
 
 // This Controller handles requests for todo items.  The items are stored
@@ -121,20 +108,19 @@ func NewController(bk *buckets.Bucket) *Controller {
 type Controller struct {
 	todos  *buckets.Bucket
 	daynum map[string]int
-	scan   map[string]buckets.Scanner
 }
 
 // getWeekendTasks handles get requests for `/weekend`, returning the
 // combined task list for saturday and sunday.
 //
-// Note how we utilize the `weekend` range scanner, which makes it easy
-// to iterate over keys in our todos bucket within a certain range,
-// viz. those keys from saturday (day number 6) to sunday (7).
+// Note how we utilize the RangeItems method, which makes it easy
+// to get items in our todos bucket with keys in a certain range
+// (6 <= key < 8), viz., the items for sat and sun.
 func (c *Controller) getWeekendTasks(w http.ResponseWriter, r *http.Request,
 	_ httprouter.Params) {
 
 	// Get todo items within the weekend range.
-	items, err := c.scan["weekend"].Items()
+	items, err := c.todos.RangeItems([]byte("6"), []byte("8"))
 	if err != nil {
 		http.Error(w, err.Error(), 500)
 	}
@@ -157,14 +143,14 @@ func (c *Controller) getWeekendTasks(w http.ResponseWriter, r *http.Request,
 // getWeekdayTasks handles get requests for `/weekdays`, returning the
 // combined task list for monday through friday.
 //
-// Note how we utilize the `weekday` range scanner, which makes it easy
-// to iterate over keys in our todos bucket within a certain range,
-// viz. those keys from monday (day number 1) to friday (5).
+// Note how we utilize the RangeItems method, which makes it easy
+// to get items in our todos bucket with keys in a certain range
+// (1 <= key < 6), viz., the items for mon through fri.
 func (c *Controller) getWeekdayTasks(w http.ResponseWriter, r *http.Request,
 	_ httprouter.Params) {
 
 	// Get todo items within the weekday range.
-	items, err := c.scan["weekday"].Items()
+	items, err := c.todos.RangeItems([]byte("1"), []byte("6"))
 	if err != nil {
 		http.Error(w, err.Error(), 500)
 	}
@@ -187,16 +173,18 @@ func (c *Controller) getWeekdayTasks(w http.ResponseWriter, r *http.Request,
 // getDayTasks handles get requests for `/:day`, returning a particular
 // day's task list.
 //
-// Note how we utilize the prefix scanner for the day requested (as indicated
-// in the route's `day` parameter). This makes it easy to iterate over keys
-// in our todos bucket with a certain prefix, viz. those with the prefix
-// representing the requested day.
+// Note how we utilize the PrefixItems method for the day requested (as
+// indicated in the route's `day` parameter). This makes it easy to get
+// items in our todos bucket with a certain prefix, viz. those with the
+// prefix representing the requested day.
 func (c *Controller) getDayTasks(w http.ResponseWriter, r *http.Request,
 	p httprouter.Params) {
 
 	// Get todo items for the day requested.
 	day := p.ByName("day")
-	items, err := c.scan[day].Items()
+	num := c.daynum[day]
+	pre := []byte(strconv.Itoa(num)) // daynum prefix to use
+	items, err := c.todos.PrefixItems(pre)
 	if err != nil {
 		http.Error(w, err.Error(), 500)
 	}
